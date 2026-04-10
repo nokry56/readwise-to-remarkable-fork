@@ -70,3 +70,22 @@ class RemarkableUploader:
             if e.stderr:
                 print(f"Error output: {e.stderr}")
             return False
+
+    def delete_file(self, remote_name: str) -> bool:
+        """Delete a file from reMarkable."""
+        remote_path = f"{self.folder}/{remote_name}"
+        try:
+            print(f"Deleting {remote_path} from reMarkable...")
+            subprocess.run(
+                [self.rmapi_path, "rm", remote_path],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            print(f"Successfully deleted {remote_path}")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to delete {remote_path}: {e}")
+            if e.stderr:
+                print(f"Error output: {e.stderr}")
+            return False

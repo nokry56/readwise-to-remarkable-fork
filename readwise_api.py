@@ -71,8 +71,17 @@ class ReadwiseAPI:
         msg = "Max retries exceeded for Readwise API"
         raise Exception(msg)
 
-    def get_documents(self, locations: list[str], tag: str) -> list[dict]:
-        """Fetch documents with specified locations and tag."""
+    def get_documents(
+        self, locations: list[str], tag: str, skip_seen: bool = True
+    ) -> list[dict]:
+        """Fetch documents with specified locations and tag.
+
+        Args:
+            locations: Readwise Reader locations to fetch from.
+            tag: Tag to filter by ('*' for all).
+            skip_seen: If True, skip documents that have been opened/seen
+                       (first_opened_at is not null). Defaults to True.
+        """
         all_documents = []
 
         for location in locations:
@@ -108,6 +117,10 @@ class ReadwiseAPI:
                         if tag not in tag_list:
                             continue
 
+                    # Skip seen documents (opened at least once)
+                    if skip_seen and doc.get("first_opened_at"):
+                        continue
+
                     all_documents.append(doc)
 
                 page_cursor = data.get("nextPageCursor")
@@ -137,3 +150,66 @@ class ReadwiseAPI:
             return data["results"][0].get("raw_source_url", "")
 
         return ""
+
+    def get_archived_document_ids(self) -> set[str]:
+        """Fetch all document IDs from the 'archive' location."""
+        archived_ids = set()
+        page_cursor = None
+
+        print("Checking for archived documents...")
+        while True:
+            params = {"location": "archive", "withHtmlContent": "false"}
+            if page_cursor:
+                params["pageCursor"] = page_cursor
+
+            response = self._make_request(
+                "GET",
+                f"{self.base_url}/list/",
+                params=params,
+            )
+            data = response.json()
+
+            for doc in data.get("results", []):
+                archived_ids.add(doc["id"])
+
+            page_cursor = data.get("nextPageCursor")
+            if not page_cursor:
+                break
+
+        return archived_ids
+
+    def get_document_location(self, doc_id: str) -> str | None:
+        """Get the current location of a specific document."""
+        params = {"id": doc_id}
+        response = self._make_request("GET", f"{self.base_url}/list/", params=params)
+        data = response.json()
+
+        if data.get("results"):
+            return data["results"][0].get("location", "")
+
+        return None
+
+    def save_document(self, url: str, title: str | None = None) -> dict | None:
+        """Save a document to Readwise Reader library.
+
+        Args:
+            url: URL of the document to save.
+            title: Optional title override.
+
+        Returns:
+            API response dict on success, None on failure.
+        """
+        payload = {"url": url, "saved_using": "api"}
+        if title:
+            payload["title"] = title
+
+        try:
+            response = self._make_request(
+                "POST",
+                f"{self.base_url}/save/",
+                json=payload,
+            )
+            return response.json()
+        except Exception as e:
+            print(f"Failed to save document to Readwise: {e}")
+            return None
