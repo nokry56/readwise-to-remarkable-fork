@@ -121,3 +121,25 @@ class ExportTracker:
             "saved_at": datetime.now(tz=UTC).isoformat(),
         }
         self._save()
+
+    # --- Highlight tracking ---
+
+    def get_all_exported(self) -> dict:
+        """Get the full exported documents dict."""
+        return dict(self.data.get("exported", {}))
+
+    def get_synced_highlights(self, doc_id: str) -> set[str]:
+        """Get the set of highlight texts already synced for a document."""
+        return set(
+            self.data.get("highlights", {}).get(doc_id, {}).get("texts", [])
+        )
+
+    def mark_highlight_synced(self, doc_id: str, text: str) -> None:
+        """Mark a highlight as synced to Readwise."""
+        hl = self.data.setdefault("highlights", {}).setdefault(
+            doc_id, {"texts": [], "last_synced": ""}
+        )
+        if text not in hl["texts"]:
+            hl["texts"].append(text)
+        hl["last_synced"] = datetime.now(tz=UTC).isoformat()
+        self._save()

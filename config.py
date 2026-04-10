@@ -39,6 +39,9 @@ tag = remarkable
 
 [economist]
 enabled = false
+
+[highlights]
+enabled = false
 """
         with Path.open(self.config_path, "w") as f:
             f.write(default_config)
@@ -75,3 +78,7 @@ enabled = false
     @property
     def economist_enabled(self) -> bool:
         return self.config.getboolean("economist", "enabled", fallback=False)
+
+    @property
+    def highlight_sync_enabled(self) -> bool:
+        return self.config.getboolean("highlights", "enabled", fallback=False)
