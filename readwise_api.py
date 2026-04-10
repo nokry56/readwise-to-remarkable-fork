@@ -80,7 +80,11 @@ class ReadwiseAPI:
             page_cursor = None
 
             while True:
-                params = {"location": location, "tag": tag, "withHtmlContent": "false"}
+                params = {"location": location, "withHtmlContent": "false"}
+
+                # Only filter by tag if one is specified
+                if tag and tag != "*":
+                    params["tag"] = tag
 
                 if page_cursor:
                     params["pageCursor"] = page_cursor
@@ -92,17 +96,19 @@ class ReadwiseAPI:
                 )
                 data = response.json()
 
-                # Filter documents by tag
                 for doc in data.get("results", []):
-                    doc_tags = doc.get("tags", {})
-                    if isinstance(doc_tags, dict):
-                        # Convert dict format to list for easier checking
-                        tag_list = list(doc_tags.keys())
-                    else:
-                        tag_list = doc_tags if isinstance(doc_tags, list) else []
+                    # If tag filtering is active, verify the tag exists
+                    if tag and tag != "*":
+                        doc_tags = doc.get("tags", {})
+                        if isinstance(doc_tags, dict):
+                            tag_list = list(doc_tags.keys())
+                        else:
+                            tag_list = doc_tags if isinstance(doc_tags, list) else []
 
-                    if tag in tag_list:
-                        all_documents.append(doc)
+                        if tag not in tag_list:
+                            continue
+
+                    all_documents.append(doc)
 
                 page_cursor = data.get("nextPageCursor")
                 if not page_cursor:
