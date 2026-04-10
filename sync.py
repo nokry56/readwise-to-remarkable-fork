@@ -87,8 +87,11 @@ class ReadwiseRemarkableSync:
         clean_title = DocumentConverter.clean_filename(title)
 
         if category == "pdf":
-            # Download PDF from source URL
+            # Download PDF from source URL or raw source
             source_url = doc.get("source_url")
+            if not source_url or source_url.startswith("mailto:"):
+                print(f"Trying raw source URL for PDF: {title}")
+                source_url = self.readwise.get_document_raw_source_url(doc_id)
             if not source_url:
                 print(f"No source URL for PDF: {title}")
                 return
@@ -96,7 +99,7 @@ class ReadwiseRemarkableSync:
             pdf_path = self.temp_dir / f"{clean_title}.pdf"
             try:
                 print(f"Downloading PDF: {title}")
-                response = requests.get(source_url, timeout=30, stream=True)
+                response = requests.get(source_url, timeout=60, stream=True)
                 response.raise_for_status()
 
                 with Path.open(pdf_path, "wb") as f:
@@ -116,13 +119,42 @@ class ReadwiseRemarkableSync:
                 print(f"Failed to download PDF {title}: {e}")
                 return
 
-        # Fetch HTML content (not included in list response)
+        # Strategy 1: Check if HTML content was already in the list response
         html_content = doc.get("html_content", "")
+
+        # Strategy 2: Fetch HTML content via API with withHtmlContent=true
         if not html_content:
             print(f"Fetching content for: {title}")
             html_content = self.readwise.get_document_content(doc_id)
+
+        # Strategy 3: Download raw source from S3 and use as HTML
         if not html_content:
-            print(f"No HTML content available for: {title}")
+            print(f"Trying raw source for: {title}")
+            raw_url = self.readwise.get_document_raw_source_url(doc_id)
+            if raw_url:
+                try:
+                    resp = requests.get(raw_url, timeout=60)
+                    resp.raise_for_status()
+                    content_type = resp.headers.get("Content-Type", "")
+                    if "pdf" in content_type:
+                        # It's actually a PDF, download and upload directly
+                        pdf_path = self.temp_dir / f"{clean_title}.pdf"
+                        with Path.open(pdf_path, "wb") as f:
+                            f.write(resp.content)
+                        upload_success = self.uploader.upload_file(pdf_path)
+                        if upload_success:
+                            self.tracker.mark_exported(doc_id, title)
+                            print(f"Successfully synced (as PDF): {title}")
+                        else:
+                            print(f"Failed to upload PDF: {title}")
+                        return
+                    else:
+                        html_content = resp.text
+                except Exception as e:
+                    print(f"Failed to fetch raw source: {e}")
+
+        if not html_content:
+            print(f"No content available for: {title} (category: {category})")
             return
 
         # Convert to EPUB

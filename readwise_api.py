@@ -126,3 +126,14 @@ class ReadwiseAPI:
             return data["results"][0].get("html_content", "")
 
         return ""
+
+    def get_document_raw_source_url(self, doc_id: str) -> str:
+        """Get a direct S3 URL to the raw source file of a document."""
+        params = {"id": doc_id, "withRawSourceUrl": "true"}
+        response = self._make_request("GET", f"{self.base_url}/list/", params=params)
+        data = response.json()
+
+        if data.get("results"):
+            return data["results"][0].get("raw_source_url", "")
+
+        return ""
