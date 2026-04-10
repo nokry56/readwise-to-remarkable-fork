@@ -116,8 +116,11 @@ class ReadwiseRemarkableSync:
                 print(f"Failed to download PDF {title}: {e}")
                 return
 
-        # Get HTML content
+        # Fetch HTML content (not included in list response)
         html_content = doc.get("html_content", "")
+        if not html_content:
+            print(f"Fetching content for: {title}")
+            html_content = self.readwise.get_document_content(doc_id)
         if not html_content:
             print(f"No HTML content available for: {title}")
             return
