@@ -139,7 +139,12 @@ class ReadwiseRemarkableSync:
             pdf_path = self.temp_dir / f"{clean_title}.pdf"
             try:
                 print(f"Downloading PDF: {title}")
-                response = requests.get(source_url, timeout=60, stream=True)
+                headers = {}
+                if "readwise.io" in source_url:
+                    headers["Authorization"] = f"Token {self.config.readwise_token}"
+                response = requests.get(
+                    source_url, timeout=60, stream=True, headers=headers
+                )
                 response.raise_for_status()
 
                 with Path.open(pdf_path, "wb") as f:
@@ -173,7 +178,10 @@ class ReadwiseRemarkableSync:
             raw_url = self.readwise.get_document_raw_source_url(doc_id)
             if raw_url:
                 try:
-                    resp = requests.get(raw_url, timeout=60)
+                    raw_headers = {}
+                    if "readwise.io" in raw_url:
+                        raw_headers["Authorization"] = f"Token {self.config.readwise_token}"
+                    resp = requests.get(raw_url, timeout=60, headers=raw_headers)
                     resp.raise_for_status()
                     content_type = resp.headers.get("Content-Type", "")
                     if "pdf" in content_type:
