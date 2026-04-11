@@ -39,6 +39,7 @@ tag = remarkable
 
 [economist]
 enabled = false
+folder = Economist
 
 [highlights]
 enabled = false
@@ -78,6 +79,10 @@ enabled = false
     @property
     def economist_enabled(self) -> bool:
         return self.config.getboolean("economist", "enabled", fallback=False)
+
+    @property
+    def economist_folder(self) -> str:
+        return self.config.get("economist", "folder", fallback="Economist")
 
     @property
     def highlight_sync_enabled(self) -> bool:
