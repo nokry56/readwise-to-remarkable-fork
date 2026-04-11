@@ -58,7 +58,12 @@ class RemarkableUploader:
             try:
                 os.chdir(file_path.parent)
                 cmd = [self.rmapi_path, "put", file_path.name, self.folder]
-                subprocess.run(cmd, capture_output=True, text=True, check=True)
+                result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                if result.returncode != 0:
+                    if "already exists" in (result.stderr or ""):
+                        print(f"Already exists on reMarkable, skipping: {file_path.name}")
+                    else:
+                        result.check_returncode()  # raise for non-exists errors
             finally:
                 os.chdir(original_cwd)
 
