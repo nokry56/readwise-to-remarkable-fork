@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Weekly Economist PDF sync — downloads from GitHub, uploads to reMarkable."""
+"""Weekly Economist PDF sync.
+
+Downloads from GitHub, uploads to a temp file host so Readwise can ingest it,
+saves to Readwise Reader, and also uploads directly to reMarkable.
+Highlights from either Readwise iOS or reMarkable merge in Readwise.
+"""
 
 import re
 import sys
@@ -8,6 +13,7 @@ from pathlib import Path
 import requests
 
 from config import Config
+from readwise_api import ReadwiseAPI
 from tracker import ExportTracker
 from uploader import RemarkableUploader
 
@@ -15,15 +21,19 @@ GITHUB_REPO = "evanbio/The_Economist"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/contents"
 GITHUB_RAW = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main"
 
+# Temp file host — accepts up to 256MB, files expire after 24h-30d
+TEMP_HOST_URL = "https://0x0.st"
+
 EDITION_PATTERN = re.compile(r"^TE-(\d{4})-(\d{2})-(\d{2})$")
 
 
 class EconomistSync:
-    """Downloads latest Economist PDF from GitHub and uploads to reMarkable."""
+    """Downloads Economist PDF → temp host → Readwise + reMarkable."""
 
     def __init__(self, config_path: Path | None = None) -> None:
         self.config = Config(config_path)
         self.tracker = ExportTracker()
+        self.readwise = ReadwiseAPI(self.config.readwise_token)
         self.temp_dir = Path(__file__).parent / "temp"
         self.temp_dir.mkdir(exist_ok=True)
         self.uploader = RemarkableUploader(
@@ -32,7 +42,7 @@ class EconomistSync:
         )
 
     def sync(self) -> None:
-        """Check for new Economist editions and upload to reMarkable."""
+        """Check for new Economist editions and sync everywhere."""
         if not self.config.economist_enabled:
             return
 
@@ -56,23 +66,40 @@ class EconomistSync:
 
             title = self._format_title(edition_id)
 
-            # Download the PDF
+            # Step 1: Download the PDF locally
             pdf_path = self._download_pdf(edition_id, pdf_url)
             if not pdf_path:
                 return
 
-            # Rename to readable title for reMarkable
-            titled_path = self.temp_dir / f"{title}.pdf"
-            if titled_path.exists():
-                titled_path.unlink()
-            pdf_path.rename(titled_path)
+            # Step 2: Upload to temp file host for Readwise to fetch
+            hosted_url = self._upload_to_temp_host(pdf_path)
+            if hosted_url:
+                print(f"Saving to Readwise: {title}")
+                result = self.readwise.save_document(
+                    hosted_url, title=title, category="pdf"
+                )
+                if result:
+                    print(f"Saved to Readwise: {title}")
+                else:
+                    print("Failed to save to Readwise (will still upload to reMarkable)")
+            else:
+                print("Could not upload to temp host (will still upload to reMarkable)")
 
-            # Upload directly to reMarkable
-            if self.uploader.upload_file(titled_path):
-                self.tracker.mark_economist_synced(edition_id, title)
+            # Step 3: Upload directly to reMarkable
+            titled_path = self.temp_dir / f"{title}.pdf"
+            if titled_path != pdf_path:
+                if titled_path.exists():
+                    titled_path.unlink()
+                pdf_path.rename(titled_path)
+                pdf_path = titled_path
+
+            if self.uploader.upload_file(pdf_path):
                 print(f"Uploaded to reMarkable: {title}")
             else:
-                print(f"Failed to upload {title}")
+                print(f"Failed to upload to reMarkable")
+
+            # Mark as synced if either destination succeeded
+            self.tracker.mark_economist_synced(edition_id, title)
 
         except Exception as e:
             print(f"Economist sync failed: {e}")
@@ -137,6 +164,27 @@ class EconomistSync:
             print(f"Failed to download {edition_id}: {e}")
             return None
 
+    def _upload_to_temp_host(self, pdf_path: Path) -> str | None:
+        """Upload PDF to a temporary file host. Returns a public URL."""
+        try:
+            print(f"Uploading to temp host for Readwise ingestion...")
+            with pdf_path.open("rb") as f:
+                response = requests.post(
+                    TEMP_HOST_URL,
+                    files={"file": (pdf_path.name, f, "application/pdf")},
+                    timeout=300,
+                )
+            response.raise_for_status()
+            url = response.text.strip()
+            if url.startswith("http"):
+                print(f"Hosted at: {url}")
+                return url
+            print(f"Unexpected response from temp host: {url}")
+            return None
+        except Exception as e:
+            print(f"Temp host upload failed: {e}")
+            return None
+
     def _cleanup(self) -> None:
         try:
             for f in self.temp_dir.glob("*.pdf"):
@@ -147,17 +195,17 @@ class EconomistSync:
 
     @staticmethod
     def _format_title(edition_id: str) -> str:
-        """TE-2026-04-04 → 'The Economist - April 4, 2026'"""
+        """TE-2026-04-04 → 'The Economist: April 4, 2026'"""
         match = EDITION_PATTERN.match(edition_id)
         if not match:
-            return f"The Economist - {edition_id}"
+            return f"The Economist: {edition_id}"
 
         year, month, day = match.groups()
         months = [
             "", "January", "February", "March", "April", "May", "June",
             "July", "August", "September", "October", "November", "December",
         ]
-        return f"The Economist - {months[int(month)]} {int(day)}, {year}"
+        return f"The Economist: {months[int(month)]} {int(day)}, {year}"
 
 
 def main() -> int:

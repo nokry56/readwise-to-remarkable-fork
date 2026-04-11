@@ -189,12 +189,15 @@ class ReadwiseAPI:
 
         return None
 
-    def save_document(self, url: str, title: str | None = None) -> dict | None:
+    def save_document(
+        self, url: str, title: str | None = None, category: str | None = None
+    ) -> dict | None:
         """Save a document to Readwise Reader library.
 
         Args:
             url: URL of the document to save.
             title: Optional title override.
+            category: Document type (article, pdf, epub, etc.).
 
         Returns:
             API response dict on success, None on failure.
@@ -202,6 +205,8 @@ class ReadwiseAPI:
         payload = {"url": url, "saved_using": "api"}
         if title:
             payload["title"] = title
+        if category:
+            payload["category"] = category
 
         try:
             response = self._make_request(
