@@ -278,12 +278,12 @@ class HighlightSync:
         self, doc_id: str, title: str, remote_name: str
     ) -> None:
         """Download a document from reMarkable, extract highlights, push to Readwise."""
-        remote_path = f"{self.remarkable_folder}/{remote_name}"
+        # rmapi uses document name without file extension
+        doc_name = Path(remote_name).stem
+        remote_path = f"{self.remarkable_folder}/{doc_name}"
 
-        # Download via rmapi get
-        zip_path = self.temp_dir / f"{remote_name}.zip"
+        # Download via rmapi get (produces .rmdoc file)
         try:
-            # rmapi get downloads to current directory as {name}.zip
             original_cwd = Path.cwd()
             try:
                 os.chdir(self.temp_dir)
@@ -300,11 +300,11 @@ class HighlightSync:
                 # Document may have been deleted from reMarkable
                 return
 
-            # Find the downloaded zip (rmapi names it after the document)
-            zip_files = list(self.temp_dir.glob("*.zip"))
-            if not zip_files:
+            # rmapi downloads as .rmdoc (which is a zip)
+            rmdoc_files = list(self.temp_dir.glob("*.rmdoc"))
+            if not rmdoc_files:
                 return
-            zip_path = zip_files[0]
+            zip_path = rmdoc_files[0]
 
         except Exception as e:
             print(f"  Could not download '{title}': {e}")
@@ -317,8 +317,8 @@ class HighlightSync:
             print(f"  Could not extract highlights from '{title}': {e}")
             return
         finally:
-            # Clean up zip
-            for zf in self.temp_dir.glob("*.zip"):
+            # Clean up downloaded files
+            for zf in self.temp_dir.glob("*.rmdoc"):
                 zf.unlink(missing_ok=True)
 
         if not highlights:
