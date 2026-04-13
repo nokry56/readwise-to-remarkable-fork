@@ -71,7 +71,40 @@ class HighlightExtractor:
                 )
                 highlights.extend(page_highlights)
 
-        return highlights
+        # Merge highlights that span page breaks: if the last highlight on
+        # page N doesn't end with sentence-ending punctuation and the first
+        # highlight on page N+1 starts with a lowercase letter, they're the
+        # same passage continued across a page boundary.
+        return HighlightExtractor._merge_cross_page(highlights)
+
+    @staticmethod
+    def _merge_cross_page(highlights: list[dict]) -> list[dict]:
+        """Merge highlights that span page breaks."""
+        if len(highlights) <= 1:
+            return highlights
+
+        merged = [highlights[0]]
+        for h in highlights[1:]:
+            prev = merged[-1]
+            prev_text = prev["text"].rstrip()
+            curr_text = h["text"]
+
+            # Check if this continues from the previous page
+            pages_adjacent = h["page"] == prev["page"] + 1
+            prev_ends_mid = prev_text and prev_text[-1] not in ".!?;\u201d"
+            curr_starts_lower = curr_text and (curr_text[0].islower() or curr_text[0] in "\"'\u201c")
+
+            if pages_adjacent and prev_ends_mid and curr_starts_lower:
+                # Merge: combine text, keep earlier page number
+                merged[-1] = {
+                    "text": prev["text"] + " " + curr_text,
+                    "page": prev["page"],
+                    "color": prev["color"],
+                }
+            else:
+                merged.append(h)
+
+        return merged
 
     @staticmethod
     def _extract_page_highlights(
