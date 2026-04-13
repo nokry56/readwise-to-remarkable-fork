@@ -415,31 +415,50 @@ class HighlightSync:
 
         print(f"  Found {len(new_highlights)} new highlights in '{title}'")
 
+        # Look up author from Readwise Reader API (only when we have highlights to push)
+        author = self._get_doc_author(doc_id)
+
         # Push to Readwise
-        success = self._push_to_readwise(title, new_highlights)
+        success = self._push_to_readwise(title, author, new_highlights)
         if success:
             for h in new_highlights:
                 self.tracker.mark_highlight_synced(doc_id, h["text"])
             print(f"  Synced {len(new_highlights)} highlights for '{title}'")
 
+    def _get_doc_author(self, doc_id: str) -> str:
+        """Look up author from Readwise Reader API."""
+        try:
+            from readwise_api import ReadwiseAPI
+            api = ReadwiseAPI(self.config.readwise_token)
+            params = {"id": doc_id}
+            response = api._make_request("GET", f"{api.base_url}/list/", params=params)
+            data = response.json()
+            if data.get("results"):
+                return data["results"][0].get("author", "")
+        except Exception:
+            pass
+        return ""
+
     def _push_to_readwise(
-        self, title: str, highlights: list[dict]
+        self, title: str, author: str, highlights: list[dict]
     ) -> bool:
         """Push highlights to Readwise via the v2 highlights API."""
-        payload = {
-            "highlights": [
-                {
-                    "text": h["text"],
-                    "title": title,
-                    "source_type": "remarkable_sync",
-                    "category": "articles",
-                    "location": h.get("page", 0),
-                    "location_type": "page",
-                    "color": h.get("color", "yellow"),
-                }
-                for h in highlights
-            ]
-        }
+        highlight_entries = []
+        for h in highlights:
+            entry = {
+                "text": h["text"],
+                "title": title,
+                "source_type": "remarkable_sync",
+                "category": "articles",
+                "location": h.get("page", 0),
+                "location_type": "page",
+                "color": h.get("color", "yellow"),
+            }
+            if author:
+                entry["author"] = author
+            highlight_entries.append(entry)
+
+        payload = {"highlights": highlight_entries}
 
         try:
             response = requests.post(
