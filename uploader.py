@@ -78,7 +78,9 @@ class RemarkableUploader:
 
     def delete_file(self, remote_name: str) -> bool:
         """Delete a file from reMarkable."""
-        remote_path = f"{self.folder}/{remote_name}"
+        # reMarkable stores docs by title without extension
+        doc_name = Path(remote_name).stem
+        remote_path = f"{self.folder}/{doc_name}"
         try:
             print(f"Deleting {remote_path} from reMarkable...")
             subprocess.run(
