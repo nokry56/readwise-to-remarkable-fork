@@ -106,21 +106,68 @@ class HighlightExtractor:
 
     @staticmethod
     def _extract_glyph_highlights(tree, page_idx: int) -> list[dict]:
-        """Extract text from GlyphRange items (EPUB highlights)."""
-        highlights = []
+        """Extract text from GlyphRange items (EPUB highlights).
 
+        GlyphRange objects are per-line fragments. Contiguous fragments
+        (where start offsets are adjacent) belong to the same highlight
+        passage and are merged. Gaps in start offsets indicate separate
+        highlight strokes.
+        """
+        # Collect raw fragments with position info
+        fragments = []
         for item in tree.walk():
-            # GlyphRange contains highlighted text directly
             cls_name = type(item).__name__
             if cls_name == "GlyphRange":
                 text = getattr(item, "text", None)
                 if text and text.strip():
-                    color = str(getattr(item, "color", "yellow"))
-                    highlights.append({
+                    fragments.append({
                         "text": text.strip(),
-                        "page": page_idx + 1,
-                        "color": _map_rm_color(color),
+                        "start": getattr(item, "start", None),
+                        "length": getattr(item, "length", None),
+                        "color": _map_rm_color(str(getattr(item, "color", "yellow"))),
                     })
+
+        if not fragments:
+            return []
+
+        # Sort by start offset (if available)
+        has_offsets = all(f["start"] is not None for f in fragments)
+        if has_offsets:
+            fragments.sort(key=lambda f: f["start"])
+
+        # Merge contiguous fragments into passages
+        # Two fragments are contiguous if the gap between them is small
+        # (allowing for whitespace/newlines between lines)
+        MAX_GAP = 20  # characters — covers newlines and small whitespace gaps
+        highlights = []
+        current_texts = [fragments[0]["text"]]
+        current_color = fragments[0]["color"]
+        current_end = (fragments[0]["start"] or 0) + (fragments[0]["length"] or 0)
+
+        for frag in fragments[1:]:
+            frag_start = frag["start"] or 0
+            gap = frag_start - current_end if has_offsets else 0
+
+            if has_offsets and gap > MAX_GAP:
+                # Gap too large — this is a new highlight passage
+                highlights.append({
+                    "text": " ".join(current_texts),
+                    "page": page_idx + 1,
+                    "color": current_color,
+                })
+                current_texts = [frag["text"]]
+                current_color = frag["color"]
+            else:
+                current_texts.append(frag["text"])
+
+            current_end = frag_start + (frag["length"] or 0)
+
+        # Don't forget the last passage
+        highlights.append({
+            "text": " ".join(current_texts),
+            "page": page_idx + 1,
+            "color": current_color,
+        })
 
         return highlights
 
