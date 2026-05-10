@@ -38,7 +38,12 @@ class EconomistSync:
         )
 
     def sync(self) -> None:
-        """Sync every Economist edition not already tracked."""
+        """Sync Economist editions newer than the latest tracked one.
+
+        - Empty tracker (first run): pull only the most recent edition.
+        - Otherwise: pull everything strictly newer than the latest tracked
+          edition. Recovers missed weeks without backfilling years of issues.
+        """
         if not self.config.economist_enabled:
             return
 
@@ -49,21 +54,35 @@ class EconomistSync:
                 print("Could not list Economist editions from GitHub.")
                 return
 
-            unsynced = [
-                e for e in editions
-                if not self.tracker.is_economist_synced(e["name"])
-            ]
-            if not unsynced:
-                print(f"Up to date ({len(editions)} editions, latest {editions[-1]['name']}).")
+            tracked = self._tracked_edition_ids()
+            if not tracked:
+                # First run: just the latest. Avoids dumping a year of back issues.
+                latest = editions[-1]
+                if self.tracker.is_economist_synced(latest["name"]):
+                    print(f"Up to date (latest {latest['name']}).")
+                else:
+                    print(f"First-run sync: pulling latest only ({latest['name']}).")
+                    self._sync_one(latest["name"])
                 return
 
-            print(f"Found {len(unsynced)} unsynced edition(s); processing oldest first.")
-            for edition in unsynced:
+            high_water = max(tracked)
+            new_editions = [e for e in editions if e["name"] > high_water]
+            if not new_editions:
+                print(f"Up to date (latest tracked: {high_water}).")
+                return
+
+            print(f"Found {len(new_editions)} new edition(s) since {high_water}.")
+            for edition in new_editions:
                 self._sync_one(edition["name"])
         except Exception as e:
             print(f"Economist sync failed: {e}")
         finally:
             self._cleanup()
+
+    def _tracked_edition_ids(self) -> list[str]:
+        """All TE-YYYY-MM-DD ids already in the tracker (sorted)."""
+        economist = self.tracker.data.get("economist", {})
+        return sorted(k for k in economist if EDITION_PATTERN.match(k))
 
     def _sync_one(self, edition_id: str) -> None:
         """Download and upload a single edition. Tracker only marked on success."""
@@ -155,17 +174,24 @@ class EconomistSync:
 
     @staticmethod
     def _format_title(edition_id: str) -> str:
-        """TE-2026-04-04 → 'The Economist: April 4, 2026'"""
+        """TE-2026-04-04 → 'Economist 7973-95-95 - April 4, 2026'.
+
+        The leading inverted-ISO token (9999-YYYY, 99-MM, 99-DD) makes
+        ascending alphabetical order put the newest issue first. The human
+        date stays in the title for readability.
+        """
         match = EDITION_PATTERN.match(edition_id)
         if not match:
-            return f"The Economist: {edition_id}"
+            return f"Economist {edition_id}"
 
         year, month, day = match.groups()
+        inv = f"{9999 - int(year):04d}-{99 - int(month):02d}-{99 - int(day):02d}"
         months = [
             "", "January", "February", "March", "April", "May", "June",
             "July", "August", "September", "October", "November", "December",
         ]
-        return f"The Economist: {months[int(month)]} {int(day)}, {year}"
+        human = f"{months[int(month)]} {int(day)}, {year}"
+        return f"Economist {inv} - {human}"
 
 
 def main() -> int:
