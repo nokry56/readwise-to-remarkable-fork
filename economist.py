@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Weekly Economist PDF sync — downloads from GitHub, uploads to reMarkable."""
+"""Weekly Economist PDF sync — downloads from GitHub, uploads to reMarkable.
+
+Syncs every edition on the upstream repo that is not yet in the tracker, not
+just the most recent one. If a week was missed (container down, upstream API
+hiccup, transient upload failure), it gets picked up next cycle instead of
+being skipped forever.
+"""
 
 import re
 import sys
@@ -19,7 +25,7 @@ EDITION_PATTERN = re.compile(r"^TE-(\d{4})-(\d{2})-(\d{2})$")
 
 
 class EconomistSync:
-    """Downloads latest Economist PDF from GitHub and uploads to reMarkable."""
+    """Downloads Economist PDFs from GitHub and uploads to reMarkable."""
 
     def __init__(self, config_path: Path | None = None) -> None:
         self.config = Config(config_path)
@@ -32,51 +38,60 @@ class EconomistSync:
         )
 
     def sync(self) -> None:
-        """Check for new Economist editions and upload to reMarkable."""
+        """Sync every Economist edition not already tracked."""
         if not self.config.economist_enabled:
             return
 
         print("\n--- Economist sync ---")
         try:
-            latest = self._find_latest_edition()
-            if not latest:
-                print("Could not determine latest Economist edition.")
+            editions = self._list_editions()
+            if not editions:
+                print("Could not list Economist editions from GitHub.")
                 return
 
-            edition_id = latest["name"]
-            if self.tracker.is_economist_synced(edition_id):
-                print(f"Economist {edition_id} already synced.")
+            unsynced = [
+                e for e in editions
+                if not self.tracker.is_economist_synced(e["name"])
+            ]
+            if not unsynced:
+                print(f"Up to date ({len(editions)} editions, latest {editions[-1]['name']}).")
                 return
 
-            print(f"New Economist edition found: {edition_id}")
-            pdf_url = self._get_pdf_url(edition_id)
-            if not pdf_url:
-                print(f"No PDF found for {edition_id}")
-                return
-
-            title = self._format_title(edition_id)
-
-            pdf_path = self._download_pdf(edition_id, pdf_url)
-            if not pdf_path:
-                return
-
-            titled_path = self.temp_dir / f"{title}.pdf"
-            if titled_path.exists():
-                titled_path.unlink()
-            pdf_path.rename(titled_path)
-
-            if self.uploader.upload_file(titled_path):
-                self.tracker.mark_economist_synced(edition_id, title)
-                print(f"Uploaded to reMarkable: {title}")
-            else:
-                print(f"Failed to upload {title}")
-
+            print(f"Found {len(unsynced)} unsynced edition(s); processing oldest first.")
+            for edition in unsynced:
+                self._sync_one(edition["name"])
         except Exception as e:
             print(f"Economist sync failed: {e}")
         finally:
             self._cleanup()
 
-    def _find_latest_edition(self) -> dict | None:
+    def _sync_one(self, edition_id: str) -> None:
+        """Download and upload a single edition. Tracker only marked on success."""
+        print(f"\nSyncing {edition_id}...")
+        pdf_url = self._get_pdf_url(edition_id)
+        if not pdf_url:
+            print(f"  No PDF found for {edition_id}, skipping.")
+            return
+
+        title = self._format_title(edition_id)
+
+        pdf_path = self._download_pdf(edition_id, pdf_url)
+        if not pdf_path:
+            return
+
+        titled_path = self.temp_dir / f"{title}.pdf"
+        if titled_path.exists():
+            titled_path.unlink()
+        pdf_path.rename(titled_path)
+
+        if self.uploader.upload_file(titled_path):
+            self.tracker.mark_economist_synced(edition_id, title)
+            print(f"  Uploaded to reMarkable: {title}")
+        else:
+            print(f"  Failed to upload {title} — will retry next cycle.")
+
+    def _list_editions(self) -> list[dict]:
+        """Return all editions on the repo, sorted ascending by date."""
         try:
             response = requests.get(GITHUB_API, timeout=30)
             response.raise_for_status()
@@ -85,17 +100,13 @@ class EconomistSync:
             editions = [
                 item
                 for item in contents
-                if item["type"] == "dir" and EDITION_PATTERN.match(item["name"])
+                if item.get("type") == "dir" and EDITION_PATTERN.match(item.get("name", ""))
             ]
-            if not editions:
-                return None
-
-            editions.sort(key=lambda x: x["name"], reverse=True)
-            return editions[0]
-
+            editions.sort(key=lambda x: x["name"])
+            return editions
         except Exception as e:
             print(f"Failed to list GitHub repo contents: {e}")
-            return None
+            return []
 
     def _get_pdf_url(self, edition_id: str) -> str | None:
         try:
@@ -112,13 +123,13 @@ class EconomistSync:
             return None
 
         except Exception as e:
-            print(f"Failed to list edition contents: {e}")
+            print(f"  Failed to list edition contents for {edition_id}: {e}")
             return None
 
     def _download_pdf(self, edition_id: str, url: str) -> Path | None:
         pdf_path = self.temp_dir / f"{edition_id}.pdf"
         try:
-            print(f"Downloading {edition_id}.pdf...")
+            print(f"  Downloading {edition_id}.pdf...")
             response = requests.get(url, timeout=300, stream=True)
             response.raise_for_status()
 
@@ -127,11 +138,11 @@ class EconomistSync:
                     f.write(chunk)
 
             size_mb = pdf_path.stat().st_size / (1024 * 1024)
-            print(f"Downloaded {size_mb:.1f} MB")
+            print(f"  Downloaded {size_mb:.1f} MB")
             return pdf_path
 
         except Exception as e:
-            print(f"Failed to download {edition_id}: {e}")
+            print(f"  Failed to download {edition_id}: {e}")
             return None
 
     def _cleanup(self) -> None:
