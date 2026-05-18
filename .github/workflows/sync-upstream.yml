@@ -26,11 +26,21 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git merge upstream/master --no-edit || {
-            echo "::warning::Merge conflict detected - manual resolution needed"
-            git merge --abort
-            exit 1
-          }
+
+          # We install deps via uv from pyproject.toml + uv.lock; requirements.txt
+          # is upstream-managed and not used here. If upstream modified it after
+          # we deleted it, resolve the modify/delete conflict by keeping it deleted.
+          if ! git merge upstream/master --no-edit; then
+            if git status --porcelain | grep -q "^DU requirements.txt"; then
+              echo "Auto-resolving requirements.txt as deleted (replaced by uv)"
+              git rm requirements.txt
+              git commit --no-edit
+            else
+              echo "::warning::Merge conflict detected - manual resolution needed"
+              git merge --abort
+              exit 1
+            fi
+          fi
 
       - name: Push
         run: git push origin master
