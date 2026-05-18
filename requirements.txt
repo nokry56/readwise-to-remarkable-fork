@@ -5,3 +5,4 @@ lxml>=5.0
 PyMuPDF>=1.25.0
 requests>=2.31
 rmscene>=0.6.0
+urllib3>=2.7.0
